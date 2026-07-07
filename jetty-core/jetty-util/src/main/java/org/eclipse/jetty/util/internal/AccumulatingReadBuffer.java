@@ -38,21 +38,35 @@ public class AccumulatingReadBuffer implements ReadableBuffer
     {
         if (readableBuffers.isEmpty())
             throw new IllegalArgumentException("Buffers list cannot be empty");
+
         this.retainable = new ReferenceCounter();
-        long totalCapacity = 0L;
         this.readableBuffers = new ArrayList<>(readableBuffers.size());
         this.originalBuffers = new ArrayList<>(readableBuffers.size());
         this.originalBufferPositions = new ArrayList<>(readableBuffers.size());
-        for (ReadableBuffer readableBuffer : readableBuffers)
-        {
-            originalBuffers.add(readableBuffer);
-            originalBufferPositions.add(readableBuffer.position());
-            readableBuffer = readableBuffer.slice();
-            totalCapacity += readableBuffer.capacity();
-            this.readableBuffers.add(readableBuffer);
-        }
-        this.capacity = totalCapacity;
+        this.capacity = fillLists(readableBuffers);
         this.position = 0L;
+    }
+
+    private long fillLists(List<ReadableBuffer> buffers)
+    {
+        long totalCapacity = 0L;
+        for (ReadableBuffer readableBuffer : buffers)
+        {
+            if (readableBuffer instanceof AccumulatingReadBuffer arb)
+            {
+                // Flatten the AccumulatingReadBuffers.
+                totalCapacity += fillLists(arb.readableBuffers);
+            }
+            else
+            {
+                this.originalBuffers.add(readableBuffer);
+                this.originalBufferPositions.add(readableBuffer.position());
+                readableBuffer = readableBuffer.slice();
+                totalCapacity += readableBuffer.capacity();
+                this.readableBuffers.add(readableBuffer);
+            }
+        }
+        return totalCapacity;
     }
 
     @Override
