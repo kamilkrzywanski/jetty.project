@@ -314,6 +314,7 @@ public class AccumulatingReadBuffer implements ReadableBuffer
         readableBuffers.forEach(Retainable::release);
         readableBuffers.clear();
         originalBuffers.clear();
+        originalBufferPositions.clear();
     }
 
     @Override
@@ -408,6 +409,7 @@ public class AccumulatingReadBuffer implements ReadableBuffer
             readableBuffers.forEach(Retainable::release);
             readableBuffers.clear();
             originalBuffers.clear();
+            originalBufferPositions.clear();
         }
         return released;
     }
