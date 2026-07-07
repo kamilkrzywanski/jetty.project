@@ -27,6 +27,8 @@ import org.eclipse.jetty.util.buffer.WritableBuffer;
 
 public class AccumulatingReadBuffer implements ReadableBuffer
 {
+    private final List<Long> originalBufferPositions;
+    private final List<ReadableBuffer> originalBuffers;
     private final List<ReadableBuffer> readableBuffers;
     private final Retainable retainable;
     private final long capacity;
@@ -39,12 +41,13 @@ public class AccumulatingReadBuffer implements ReadableBuffer
         this.retainable = new ReferenceCounter();
         long totalCapacity = 0L;
         this.readableBuffers = new ArrayList<>(readableBuffers.size());
+        this.originalBuffers = new ArrayList<>(readableBuffers.size());
+        this.originalBufferPositions = new ArrayList<>(readableBuffers.size());
         for (ReadableBuffer readableBuffer : readableBuffers)
         {
-            if (readableBuffer.remaining() != readableBuffer.capacity())
-                readableBuffer = readableBuffer.slice();
-            else
-                readableBuffer.retain();
+            originalBuffers.add(readableBuffer);
+            originalBufferPositions.add(readableBuffer.position());
+            readableBuffer = readableBuffer.slice();
             totalCapacity += readableBuffer.capacity();
             this.readableBuffers.add(readableBuffer);
         }
@@ -64,11 +67,16 @@ public class AccumulatingReadBuffer implements ReadableBuffer
         if (newPosition > capacity)
             throw new IllegalArgumentException("newPosition(" + newPosition + ") > capacity(" + capacity + ")");
         this.position = newPosition;
-        for (ReadableBuffer currentRb : readableBuffers)
+        for (int i = 0; i < readableBuffers.size(); i++)
         {
+            ReadableBuffer currentRb = readableBuffers.get(i);
+            ReadableBuffer originalRb = originalBuffers.get(i);
+            Long originalRbPosition = originalBufferPositions.get(i);
+
             long currentLimit = currentRb.capacity();
             long nextLimit = Math.min(newPosition, currentLimit);
             currentRb.position(nextLimit);
+            originalRb.position(originalRbPosition + nextLimit);
             newPosition -= currentLimit;
             newPosition = Math.max(0L, newPosition);
         }
@@ -128,6 +136,28 @@ public class AccumulatingReadBuffer implements ReadableBuffer
         return tmpBuf.flip();
     }
 
+    private void consumeOriginalBuffers(long byteCount)
+    {
+        for (ReadableBuffer originalBuffer : originalBuffers)
+        {
+            if (originalBuffer.remaining() == 0L)
+                continue;
+            if (originalBuffer.remaining() >= byteCount)
+            {
+                originalBuffer.position(originalBuffer.position() + byteCount);
+                break;
+            }
+            else
+            {
+                long remaining = originalBuffer.remaining();
+                originalBuffer.position(originalBuffer.position() + remaining);
+                byteCount -= remaining;
+            }
+            if (byteCount == 0)
+                break;
+        }
+    }
+
     @Override
     public byte get(long index)
     {
@@ -146,6 +176,7 @@ public class AccumulatingReadBuffer implements ReadableBuffer
     {
         ReadableBuffer readableBuffer = currentReadableBuffer();
         position++;
+        consumeOriginalBuffers(1);
         return readableBuffer.get();
     }
 
@@ -155,10 +186,13 @@ public class AccumulatingReadBuffer implements ReadableBuffer
         ReadableBuffer currentRb = currentReadableBuffer();
         if (currentRb.remaining() >= 2L)
         {
+            consumeOriginalBuffers(2);
             position += 2L;
             return currentRb.getShort();
         }
-        return fragmentedGet(currentRb, 2).getShort();
+        short aShort = fragmentedGet(currentRb, 2).getShort();
+        consumeOriginalBuffers(2);
+        return aShort;
     }
 
     @Override
@@ -167,10 +201,13 @@ public class AccumulatingReadBuffer implements ReadableBuffer
         ReadableBuffer currentRb = currentReadableBuffer();
         if (currentRb.remaining() >= 4L)
         {
+            consumeOriginalBuffers(4);
             position += 4L;
             return currentRb.getInt();
         }
-        return fragmentedGet(currentRb, 4).getInt();
+        int anInt = fragmentedGet(currentRb, 4).getInt();
+        consumeOriginalBuffers(4);
+        return anInt;
     }
 
     @Override
@@ -179,10 +216,13 @@ public class AccumulatingReadBuffer implements ReadableBuffer
         ReadableBuffer currentRb = currentReadableBuffer();
         if (currentRb.remaining() >= 8L)
         {
+            consumeOriginalBuffers(8);
             position += 8L;
             return currentRb.getLong();
         }
-        return fragmentedGet(currentRb, 8).getLong();
+        long aLong = fragmentedGet(currentRb, 8).getLong();
+        consumeOriginalBuffers(8);
+        return aLong;
     }
 
     @Override
@@ -191,11 +231,13 @@ public class AccumulatingReadBuffer implements ReadableBuffer
         ReadableBuffer currentRb = currentReadableBuffer();
         if (currentRb.remaining() >= b.length)
         {
+            consumeOriginalBuffers(b.length);
             position += b.length;
             currentRb.get(b);
             return;
         }
         fragmentedGet(currentRb, b.length).get(b);
+        consumeOriginalBuffers(b.length);
     }
 
     @Override
@@ -204,11 +246,13 @@ public class AccumulatingReadBuffer implements ReadableBuffer
         ReadableBuffer currentRb = currentReadableBuffer();
         if (currentRb.remaining() >= len)
         {
+            consumeOriginalBuffers(len);
             position += b.length;
             currentRb.get(b, off, len);
             return;
         }
         fragmentedGet(currentRb, len).get(b, off, len);
+        consumeOriginalBuffers(len);
     }
 
     @Override
@@ -269,6 +313,7 @@ public class AccumulatingReadBuffer implements ReadableBuffer
     {
         readableBuffers.forEach(Retainable::release);
         readableBuffers.clear();
+        originalBuffers.clear();
     }
 
     @Override
@@ -295,6 +340,7 @@ public class AccumulatingReadBuffer implements ReadableBuffer
             gatheringTarget.write(buffers.toArray(new ByteBuffer[0]));
             long totalWritten = totalRemainingBefore - remaining();
             position += totalWritten;
+            consumeOriginalBuffers(totalWritten);
             return totalWritten;
         }
 
@@ -316,6 +362,7 @@ public class AccumulatingReadBuffer implements ReadableBuffer
             if (remainingAfter > 0L)
                 break;
         }
+        consumeOriginalBuffers(totalWritten);
         return totalWritten;
     }
 
@@ -360,6 +407,7 @@ public class AccumulatingReadBuffer implements ReadableBuffer
         {
             readableBuffers.forEach(Retainable::release);
             readableBuffers.clear();
+            originalBuffers.clear();
         }
         return released;
     }
