@@ -46,8 +46,13 @@ public class ZstandardDecoderSource extends DecoderSource
         ByteBuffer input = inputChunk.getByteBuffer();
         if (!inputChunk.hasRemaining())
             return inputChunk;
+        RetainableByteBuffer.Mutable rbb = null;
         if (!input.isDirect())
-            throw new IllegalArgumentException("Read Chunk is not a Direct ByteBuffer");
+        {
+            rbb = compression.acquireByteBuffer(input.remaining());
+            rbb.append(input);
+            input = rbb.getByteBuffer();
+        }
         RetainableByteBuffer dst = compression.acquireByteBuffer(bufferSize);
         boolean last = inputChunk.isLast();
         dst.getByteBuffer().clear();
@@ -55,6 +60,12 @@ public class ZstandardDecoderSource extends DecoderSource
         if (!fullyFlushed)
             last = false;
         dst.getByteBuffer().flip();
+        if (rbb != null)
+        {
+            ByteBuffer originalInput = inputChunk.getByteBuffer();
+            originalInput.position(originalInput.position() - input.remaining());
+            rbb.release();
+        }
         return Content.Chunk.asChunk(dst.getByteBuffer(), last, dst);
     }
 
