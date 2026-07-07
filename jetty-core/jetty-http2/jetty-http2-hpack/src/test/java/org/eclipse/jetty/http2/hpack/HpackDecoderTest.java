@@ -574,7 +574,7 @@ public class HpackDecoderTest
     {
         HpackEncoder encoder = new HpackEncoder();
         byte[] bytes = new byte[1024];
-        WritableBuffer byteBuffer = ReadableBuffer.wrap(ByteBuffer.wrap(bytes)).toWritable();
+        WritableBuffer byteBuffer = WritableBuffer.wrap(ByteBuffer.wrap(bytes));
         // Use the Authorization header because its value is not Huffman-encoded.
         encoder.encode(byteBuffer, new HttpField(HttpHeader.AUTHORIZATION, "São Paulo"));
         ReadableBuffer rb = byteBuffer.toReadable();
