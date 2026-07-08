@@ -23,14 +23,12 @@ import org.eclipse.jetty.fcgi.FCGI;
 import org.eclipse.jetty.fcgi.generator.Flusher;
 import org.eclipse.jetty.fcgi.generator.ServerGenerator;
 import org.eclipse.jetty.http.HostPortHttpField;
-import org.eclipse.jetty.http.HttpException;
 import org.eclipse.jetty.http.HttpField;
 import org.eclipse.jetty.http.HttpFields;
 import org.eclipse.jetty.http.HttpHeader;
 import org.eclipse.jetty.http.HttpHeaderValue;
 import org.eclipse.jetty.http.HttpMethod;
 import org.eclipse.jetty.http.HttpScheme;
-import org.eclipse.jetty.http.HttpStatus;
 import org.eclipse.jetty.http.HttpVersion;
 import org.eclipse.jetty.http.MetaData;
 import org.eclipse.jetty.io.Content;
@@ -210,9 +208,16 @@ public class HttpStreamOverFCGI implements HttpStream
 
     public void onFailure(Throwable failure)
     {
-        Runnable task = getHttpChannel().onFailure(failure);
-        if (task != null)
-            task.run();
+        if (Content.Chunk.isFailure(_chunk, true))
+        {
+            _chunk.getFailure().addSuppressed(failure);
+        }
+        else
+        {
+            if (_chunk != null)
+                _chunk.release();
+            _chunk = Content.Chunk.from(failure, true);
+        }
     }
 
     @Override
