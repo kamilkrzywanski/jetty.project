@@ -17,10 +17,12 @@ import java.io.IOException;
 import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.eclipse.jetty.util.buffer.ReadableBuffer;
+import org.eclipse.jetty.util.buffer.WritableBuffer;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -1030,5 +1032,48 @@ public class AccumulatingReadBufferTest
         assertEquals(0, rb2.getRetained());
         assertEquals(0, rb3.getRetained());
         assertEquals(0, rb4.getRetained());
+    }
+
+    @Test
+    public void testSlicePositionLengthInterleavedPositions()
+    {
+        List<ReadableBuffer> buffers = List.of(
+            allocate(9, (byte)1),
+            allocate(76, (byte)2),
+            allocate(9, (byte)3),
+            allocate(16384, (byte)4),
+            allocate(9, (byte)5),
+            allocate(16384, (byte)6),
+            allocate(9, (byte)7),
+            allocate(16384, (byte)8),
+            allocate(9, (byte)9),
+            allocate(16383, (byte)10)
+        );
+
+        ReadableBuffer acc = ReadableBuffer.accumulate(buffers);
+        acc.position(16384);
+
+        {
+            ReadableBuffer slice = acc.slice(16384, 16384);
+            assertEquals(16384, slice.remaining());
+            slice.release();
+        }
+        {
+            ReadableBuffer slice = acc.slice(32768, 16384);
+            assertEquals(16384, slice.remaining());
+            slice.release();
+        }
+
+        buffers.forEach(ReadableBuffer::release);
+    }
+
+    private ReadableBuffer allocate(int capacity, byte fill)
+    {
+        byte[] bytes = new byte[capacity];
+        Arrays.fill(bytes, fill);
+        ByteBuffer byteBuffer = ByteBuffer.wrap(bytes);
+        byteBuffer.position(capacity);
+        byteBuffer.limit(capacity);
+        return WritableBuffer.wrap(byteBuffer).toReadable();
     }
 }

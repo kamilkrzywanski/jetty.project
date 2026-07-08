@@ -275,10 +275,12 @@ public class AccumulatingReadBuffer implements ReadableBuffer
         List<ReadableBuffer> copy = new ArrayList<>(readableBuffers.size());
         for (ReadableBuffer readableBuffer : readableBuffers)
         {
-            copy.add(readableBuffer.slice());
-            readableBuffer.release();
+            ReadableBuffer slice = readableBuffer.slice();
+            copy.add(slice);
         }
-        return new AccumulatingReadBuffer(copy);
+        ReadableBuffer result = new AccumulatingReadBuffer(copy);
+        copy.forEach(Retainable::release);
+        return result;
     }
 
     @Override
@@ -291,29 +293,49 @@ public class AccumulatingReadBuffer implements ReadableBuffer
         if (position + length > capacity)
             throw new IllegalArgumentException("position(" + position + ") + length(" + length + ") must be <= capacity(" + capacity + ")");
 
+        if (length == 0)
+            return EMPTY;
+
         List<ReadableBuffer> copy = new ArrayList<>(readableBuffers.size());
 
-        for (ReadableBuffer readableBuffer : readableBuffers)
+        int i;
+        long seekPosition = position;
+        // First, skip buffers up to position.
+        for (i = 0; i < readableBuffers.size(); i++)
         {
-            if (length == 0)
-                break;
-
+            ReadableBuffer readableBuffer = readableBuffers.get(i);
             long limit = readableBuffer.capacity();
 
-            if (position >= limit)
-            {
-                position -= limit;
-                continue;
-            }
-
-            long sliceLength = Math.min(readableBuffer.remaining(), length);
-            ReadableBuffer slice = readableBuffer.slice(position, sliceLength);
-            copy.add(slice);
-            slice.release();
-            length -= sliceLength;
+            if (seekPosition < limit)
+                break;
+            seekPosition -= limit;
         }
+        // Second, slice the remaining buffers up to length.
+        for (; i < readableBuffers.size(); i++)
+        {
+            ReadableBuffer readableBuffer = readableBuffers.get(i);
+            long subSlicePosition = readableBuffer.capacity() - (readableBuffer.capacity() - seekPosition);
+            long subSliceLength;
+            seekPosition = 0L;
 
-        return copy.isEmpty() ? EMPTY : new AccumulatingReadBuffer(copy);
+            long remaining = readableBuffer.capacity() - subSlicePosition;
+            if (length > remaining)
+                subSliceLength = remaining;
+            else
+                subSliceLength = length;
+            length -= remaining;
+
+            ReadableBuffer slice = readableBuffer.slice(subSlicePosition, subSliceLength);
+            copy.add(slice);
+
+            if (length <= 0L)
+            {
+                ReadableBuffer result = new AccumulatingReadBuffer(copy);
+                copy.forEach(Retainable::release);
+                return result;
+            }
+        }
+        throw new IllegalStateException("Should not happen");
     }
 
     @Override
